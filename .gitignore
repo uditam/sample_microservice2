@@ -10,6 +10,9 @@
 # Mobile Tools for Java (J2ME)
 .mtj.tmp/
 
+# Compiled class file
+*.class
+
 # Package Files #
 *.jar
 *.war
@@ -24,6 +27,15 @@ hs_err_pid*
 
 # IDE
 .vscode
+.settings/
 
 # Java Target
-/target/
+target/*
+*.class
+*.jar
+*.war
+*.ear
+*.logs
+*.iml
+.idea/
+.eclipse
