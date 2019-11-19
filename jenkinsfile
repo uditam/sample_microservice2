@@ -1,0 +1,198 @@
+echo '''
+
+###########################################################
+#               Starting a pipeline script                #
+#                    For CI procedure                     #
+###########################################################
+
+        '''
+
+def MavenBuildFailure(){
+
+        echo '''
+
+###########################################################
+#                 MAVEN BUILD FAILED                      #
+#             you might check your pom file               #
+#          or if you named the command correctly          #
+###########################################################
+
+   '''
+}
+
+def DockerImageBuildFailure(){
+
+        echo '''
+
+###########################################################
+#                   BUILD IMAGE FAILED                    #
+#             you might check if the dockerfile           #
+#              is corrupted, or if you named              #
+#                  the command correctly                  #
+###########################################################
+
+        '''
+}
+
+def DockerLoginFailure(){
+
+        echo '''
+
+###########################################################
+#                    LOGIN DTR FAILED                     #
+#              you might check the dtr hosname            #
+#              or your credentials for this login         #
+###########################################################
+
+        '''
+}
+
+def DockerPushFailure(){
+
+        echo '''
+
+############################################################
+#                    DOCKER PUSH FAILED                    #
+#            you might check if you named the              #
+#           repository correctly, or if you have           #
+#             permission to that repository                #
+############################################################
+
+    '''
+}
+
+ 
+
+node ('linux'){
+
+ 
+
+        checkout scm
+
+        stage ('set environment variables'){
+            try {
+                deploySettings = getDeploySettings()
+                env.CLUSTER_NAME = "${deploySettings.cluster_name}"
+                env.HARBOR_NAME = "${deploySettings.harbor_name}"
+                env.HARBOR_HOST = "${HARBOR_NAME}.domain.com"
+                env.PUSH_REPO = 'devops'
+                env.PROJECT_NAME = "${deploySettings.project_name}"
+                env.NEW_IMAGE_NAME="${HARBOR_HOST}/${PUSH_REPO}/${PROJECT_NAME}"
+                env.JOB_NAME="${JOB_NAME}"
+                env.SERVICE_ACCOUNT = "${deploySettings.service_account}"
+
+                echo 'Deploy settings were set'
+
+        }      catch(err) {
+
+                println(err.getMessage());
+
+                throw err
+
+                       }
+        }
+               stage ('Build') {
+
+               try{
+                       sh "mvn clean install dependency:analyze -DignoreNonCompile"
+               }
+
+               catch(all){
+
+                       MavenBuildFailure()
+
+                       sh "exit 1"
+
+               }
+
+        }
+
+        stage ('Create image'){
+
+               try{
+                       sh ''' sudo docker build -t "${NEW_IMAGE_NAME}:${BUILD_NUMBER}" -t "${NEW_IMAGE_NAME}:latest" . '''
+               }
+
+               catch(all){
+
+                       DockerImageBuildFailure()
+                       sh "exit 1"
+               }
+
+    }
+
+ 
+
+        stage ('Push image to Image Repository'){
+
+               withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'Jenkins', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']])  {
+
+                       try{
+
+                               sh ''' sudo docker login -u "$USERNAME" -p "$PASSWORD" "https://${HARBOR_HOST}" '''
+
+                       }
+
+                       catch(all){
+
+                           DockerLoginFailure()
+
+                           sh "exit 1"
+
+                       }
+
+                       try{
+
+                               sh ''' sudo docker push "${NEW_IMAGE_NAME}:${BUILD_NUMBER}"
+
+                               sudo docker push "${NEW_IMAGE_NAME}:latest"
+
+                               '''
+
+                       }
+
+                       catch(all){
+
+                           DockerPushFailure()
+
+                               sh "exit 1"
+
+                                      }
+
+                       sh ''' sudo docker logout '''
+
+               }
+
+ 
+
+        }
+
+        stage('Run Docker Container') {
+
+               withKubeConfig([credentialsId: "${SERVICE_ACCOUNT}"]){
+               sh ''' sudo docker run "${NEW_IMAGE_NAME}:${BUILD_NUMBER}" '''
+               }
+    }
+
+}
+
+ 
+
+def getDeploySettings() {
+
+        def deploySettings = [:]
+
+        deploySettings['project_name'] = JOB_NAME.split('/')[-2]
+        if (BRANCH_NAME == 'master') { //
+            deploySettings['cluster_name'] = "prod"
+            deploySettings['service_account'] = "jenkins-p"
+            deploySettings['harbor_name'] = "harbor-p"
+        } else {
+            deploySettings['cluster_name'] = "dev"
+            deploySettings['service_account'] = "jenkins-d"
+            deploySettings['harbor_name'] = "harbor-d"
+        }
+
+        return deploySettings
+
+    }
